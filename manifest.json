@@ -1,0 +1,13 @@
+
+{
+  "id": "./",
+  "name": "Block Puzzle",
+  "short_name": "Block Puzzle",
+  "description": "A fun and colourful block puzzle game.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#071A3D",
+  "theme_color": "#071A3D"
+}

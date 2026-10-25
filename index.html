@@ -1,0 +1,275 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Block Puzzle Pro</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101526;color:#fff;font-family:Arial,sans-serif;text-align:center;padding:14px;touch-action:pan-y}
+header{display:flex;justify-content:space-between;align-items:center;max-width:440px;margin:auto}
+h1{font-size:23px;color:#f9cf64;margin:10px 0}
+button{border:0;border-radius:12px;padding:12px 16px;background:#7758ee;color:white;font-weight:bold;font-size:15px;cursor:pointer}
+.stats{display:flex;gap:12px;max-width:400px;margin:18px auto;justify-content:center}
+.stat{flex:1;background:#202a42;border:1px solid #34405b;border-radius:14px;padding:12px}
+.stat span{display:block;color:#aab6d0;font-size:12px;margin-bottom:8px}
+.stat strong{font-size:27px;font-variant-numeric:tabular-nums}
+#score{color:#f9cf64}#best{color:#65dfc0}
+#board{width:min(94vw,400px);aspect-ratio:1;margin:15px auto;background:#202a42;border:2px solid #34415e;border-radius:12px;padding:5px;display:grid;grid-template-columns:repeat(10,minmax(0,1fr));grid-template-rows:repeat(10,minmax(0,1fr));gap:3px;touch-action:none;position:relative}
+.cell{min-width:0;min-height:0;border-radius:4px;background:#303b55}
+.cell.filled{box-shadow:inset 0 0 2px #ffffff99}
+.cell.target{outline:2px solid #fff;filter:brightness(1.3)}
+#tray{display:flex;justify-content:space-around;align-items:center;gap:6px;max-width:440px;margin:15px auto;min-height:100px}
+.piece{width:31%;min-height:90px;background:#202a42;border:2px solid #34415e;border-radius:14px;display:flex;justify-content:center;align-items:center;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
+.piece.selected{border-color:#f9cf64}
+.shape{display:grid;gap:4px;pointer-events:none}
+.tile{width:clamp(17px,5vw,24px);aspect-ratio:1;border-radius:5px;box-shadow:inset 0 1px 3px #ffffff66}
+#dragGhost{position:fixed;z-index:1000;pointer-events:none;display:none;opacity:.94;transform:translate(-50%,-65%);filter:drop-shadow(0 8px 12px #0008)}
+#message{color:#cbd5e1;min-height:24px;font-size:14px}
+.actions{display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
+#settings{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;z-index:2000;padding:20px}
+.panel{background:#202a42;border:1px solid #495776;border-radius:20px;padding:24px;width:min(100%,340px);text-align:left}
+.panel h2{text-align:center;margin-top:0}
+.setting{display:flex;justify-content:space-between;align-items:center;margin:20px 0}
+.setting input{width:22px;height:22px;accent-color:#7758ee}
+.panel button{width:100%}
+#gameover{display:none;color:#f9cf64;font-weight:bold;font-size:20px;margin:10px}
+@media(max-width:360px){body{padding:8px}.stat{padding:9px}.stat strong{font-size:23px}#board{gap:2px;padding:4px}.tile{width:17px}}
+</style>
+</head>
+<body>
+<header>
+<h1>🧩 Block Puzzle</h1>
+<button id="settingsBtn">⚙️</button>
+</header>
+
+<div class="stats">
+<div class="stat"><span>CURRENT SCORE</span><strong id="score">0</strong></div>
+<div class="stat"><span>🏆 HIGH SCORE</span><strong id="best">0</strong></div>
+</div>
+
+<div id="board"></div>
+<p id="message">Hold a block, drag it onto the board and release.</p>
+<h3>Choose your blocks</h3>
+<div id="tray"></div>
+<div id="gameover">Game Over!</div>
+<div class="actions">
+<button id="restart">↻ New Game</button>
+</div>
+
+<div id="settings">
+<div class="panel">
+<h2>⚙️ Settings</h2>
+<label class="setting">Sound effects <input type="checkbox" id="sound" checked></label>
+<label class="setting">Vibration <input type="checkbox" id="vibrate" checked></label>
+<label class="setting">Background music <input type="checkbox" id="music"></label>
+<button id="closeSettings">Save & Close</button>
+</div>
+</div>
+<div id="dragGhost"></div>
+
+<script>
+const N=10;
+const COLORS=['#38bdf8','#fb7185','#a78bfa','#4ade80','#fbbf24','#f97316'];
+const SHAPES=[
+[[0,0]],[[0,0],[0,1]],[[0,0],[1,0]],
+[[0,0],[0,1],[0,2]],[[0,0],[1,0],[2,0]],
+[[0,0],[0,1],[1,0],[1,1]],
+[[0,0],[1,0],[1,1]],[[0,0],[0,1],[1,1]],
+[[0,0],[0,1],[0,2],[1,1]],
+[[0,0],[1,0],[2,0],[3,0]],
+[[0,0],[0,1],[0,2],[0,3]],
+[[0,0],[1,0],[2,0],[2,1]],
+[[0,1],[1,0],[1,1],[1,2]]
+];
+
+const board=document.querySelector('#board');
+const tray=document.querySelector('#tray');
+const ghost=document.querySelector('#dragGhost');
+const message=document.querySelector('#message');
+let grid, pieces, score=0, best=0, drag=null, gameOver=false;
+let soundOn=true,vibrateOn=true,musicOn=false,audioCtx=null;
+
+try{best=Number(localStorage.getItem('bpBest'))||0}catch(e){}
+document.querySelector('#best').textContent=best;
+
+function beep(freq=500){
+ if(!soundOn)return;
+ try{
+  audioCtx ||= new (window.AudioContext||window.webkitAudioContext)();
+  if(audioCtx.state==='suspended')audioCtx.resume();
+  const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+  o.frequency.value=freq;g.gain.value=.035;
+  o.connect(g);g.connect(audioCtx.destination);
+  o.start();o.stop(audioCtx.currentTime+.08);
+ }catch(e){}
+}
+function buzz(){if(vibrateOn&&navigator.vibrate)navigator.vibrate(20)}
+function makePiece(){
+ return {shape:SHAPES[Math.floor(Math.random()*SHAPES.length)],color:COLORS[Math.floor(Math.random()*COLORS.length)]};
+}
+function restart(){
+ grid=Array.from({length:N},()=>Array(N).fill(null));
+ pieces=[makePiece(),makePiece(),makePiece()];
+ score=0;gameOver=false;drag=null;
+ document.querySelector('#gameover').style.display='none';
+ ghost.style.display='none';
+ message.textContent='Hold a block, drag it onto the board and release.';
+ animateScore(0);renderBoard();renderTray();
+}
+function renderBoard(){
+ board.innerHTML='';
+ grid.forEach((row,r)=>row.forEach((color,c)=>{
+  const el=document.createElement('div');
+  el.className='cell'+(color?' filled':'');
+  if(color)el.style.background=color;
+  el.dataset.r=r;el.dataset.c=c;
+  board.appendChild(el);
+ }));
+}
+function shapeElement(p,cellSize=20){
+ const el=document.createElement('div');
+ el.className='shape';
+ const rows=Math.max(...p.shape.map(x=>x[0]))+1;
+ const cols=Math.max(...p.shape.map(x=>x[1]))+1;
+ el.style.gridTemplateColumns=`repeat(${cols},${cellSize}px)`;
+ for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+  const t=document.createElement('div');
+  t.className='tile';
+  if(p.shape.some(x=>x[0]===r&&x[1]===c))t.style.background=p.color;
+  else t.style.visibility='hidden';
+  t.style.width=cellSize+'px';
+  el.appendChild(t);
+ }
+ return el;
+}
+function renderTray(){
+ tray.innerHTML='';
+ pieces.forEach((p,i)=>{
+  const el=document.createElement('div');
+  el.className='piece';
+  if(!p){el.style.opacity='.22';el.textContent='✓';tray.appendChild(el);return}
+  el.appendChild(shapeElement(p,Math.min(23,Math.max(16,innerWidth*.052))));
+  el.addEventListener('pointerdown',e=>startDrag(e,i,el));
+  tray.appendChild(el);
+ });
+}
+function startDrag(e,i,el){
+ if(gameOver||!pieces[i])return;
+ e.preventDefault();
+ buzz();
+ const p=pieces[i];
+ drag={i,p,el,x:e.clientX,y:e.clientY};
+ ghost.innerHTML='';
+ ghost.appendChild(shapeElement(p,Math.min(27,Math.max(19,innerWidth*.065))));
+ ghost.style.display='block';
+ moveGhost(e.clientX,e.clientY);
+ el.classList.add('selected');
+ window.addEventListener('pointermove',onMove);
+ window.addEventListener('pointerup',onUp,{once:true});
+}
+function moveGhost(x,y){
+ ghost.style.left=x+'px';ghost.style.top=y+'px';
+}
+function onMove(e){
+ if(!drag)return;
+ e.preventDefault();
+ drag.x=e.clientX;drag.y=e.clientY;
+ moveGhost(e.clientX,e.clientY);
+ highlightTarget(e.clientX,e.clientY);
+}
+function getCell(x,y){
+ const rect=board.getBoundingClientRect();
+ if(x<rect.left||x>rect.right||y<rect.top||y>rect.bottom)return null;
+ const pitch=rect.width/N;
+ return {r:Math.floor((y-rect.top-5)/(pitch)),c:Math.floor((x-rect.left-5)/(pitch))};
+}
+function highlightTarget(x,y){
+ document.querySelectorAll('.target').forEach(el=>el.classList.remove('target'));
+ const cell=getCell(x,y);
+ if(!cell||!drag)return;
+ drag.p.shape.forEach(([dr,dc])=>{
+  const el=board.querySelector(`[data-r="${cell.r+dr}"][data-c="${cell.c+dc}"]`);
+  if(el)el.classList.add('target');
+ });
+}
+function onUp(e){
+ window.removeEventListener('pointermove',onMove);
+ document.querySelectorAll('.target').forEach(el=>el.classList.remove('target'));
+ ghost.style.display='none';
+ if(!drag)return;
+ const cell=getCell(e.clientX,e.clientY);
+ const d=drag;
+ drag=null;
+ if(d.el)d.el.classList.remove('selected');
+ if(cell)place(d.i,cell.r,cell.c);
+}
+function place(i,r,c){
+ const p=pieces[i];if(!p||gameOver)return;
+ for(const [dr,dc] of p.shape){
+  const rr=r+dr,cc=c+dc;
+  if(rr<0||cc<0||rr>=N||cc>=N||grid[rr][cc]){
+   message.textContent='That block does not fit there. Try another spot.';
+   beep(180);return;
+  }
+ }
+ p.shape.forEach(([dr,dc])=>grid[r+dr][c+dc]=p.color);
+ pieces[i]=null;
+ let lines=0;
+ for(let rr=0;rr<N;rr++)if(grid[rr].every(Boolean)){
+  grid[rr].fill(null);lines++;
+ }
+ for(let cc=0;cc<N;cc++)if(grid.every(row=>row[cc])){
+  for(let rr=0;rr<N;rr++)grid[rr][cc]=null;
+  lines++;
+ }
+ const gained=p.shape.length*1+lines*10+Math.max(0,lines-1)*5;
+ animateScore(score+gained);
+ if(score>best){
+  best=score;
+  try{localStorage.setItem('bpBest',best)}catch(e){}
+  document.querySelector('#best').textContent=best;
+ }
+ beep(lines?780:480);buzz();
+ if(pieces.every(x=>!x))pieces=[makePiece(),makePiece(),makePiece()];
+ renderBoard();renderTray();
+ if(!canMove()){
+  gameOver=true;
+  document.querySelector('#gameover').style.display='block';
+  message.textContent='No more possible moves. Start a new game!';
+ }else{
+  message.textContent=lines?`Great! ${lines} line(s) cleared!`:'Nice move! Keep going.';
+ }
+}
+function canMove(){
+ return pieces.some(p=>p&&grid.some((row,r)=>row.some((v,c)=>
+  p.shape.every(([dr,dc])=>r+dr<N&&c+dc<N&&!grid[r+dr][c+dc])
+ )));
+}
+let scoreAnim=null;
+function animateScore(target){
+ if(scoreAnim)cancelAnimationFrame(scoreAnim);
+ const start=score,delta=target-start,t0=performance.now(),duration=450;
+ function frame(now){
+  const t=Math.min(1,(now-t0)/duration);
+  const eased=1-Math.pow(1-t,3);
+  document.querySelector('#score').textContent=Math.round(start+delta*eased);
+  if(t<1)scoreAnim=requestAnimationFrame(frame);
+  else{score=target;scoreAnim=null}
+ }
+ scoreAnim=requestAnimationFrame(frame);
+}
+document.querySelector('#restart').onclick=restart;
+document.querySelector('#settingsBtn').onclick=()=>document.querySelector('#settings').style.display='flex';
+document.querySelector('#closeSettings').onclick=()=>{
+ soundOn=document.querySelector('#sound').checked;
+ vibrateOn=document.querySelector('#vibrate').checked;
+ musicOn=document.querySelector('#music').checked;
+ document.querySelector('#settings').style.display='none';
+ message.textContent=musicOn?'Background music option saved.':'Settings saved.';
+};
+restart();
+</script>
+</body>
+</html>
